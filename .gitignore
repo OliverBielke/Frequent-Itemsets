@@ -2,3 +2,4 @@ Data/*
 *.dat
 .env
 *.env
+.DS_Store
