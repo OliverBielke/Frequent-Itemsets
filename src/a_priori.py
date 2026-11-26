@@ -23,21 +23,38 @@ class APriori:
 		"""The support. """
 
 
-	def _first_filter(self) -> DataFrame:
-		"""Does the first step of filtering. 
+	def apriori_algorithm(self) -> list[DataFrame]:
+		"""Get the dataframes of the supported sets at each number of elements in increasing order. 
 		
 		Returns:
-			supported (DataFrame): The dataframe with only the sets with enough support. """
+			df_list (list[DataFrame]): List of the dataframes with the supported sets. """
+
+		df_list = []
 
 		items = self.df.select(F.explode('basket').alias('set')) # Each item in its own row
+		
+		set_list = items.withColumn('set', F.array('set')) # Each item in its own list (set)
 
-		item_lists = items.withColumn('set', F.array('set')) # Each item in its own list (set)
-	
-		support = item_lists.groupBy('set').count().withColumnRenamed('count', 'support') # Count each set
-	
-		supported = support.filter(F.col('support') >= self.s) # Filter based on how many times the set appears
+		supported_set = self._scan(potential_sets=set_list)
 
-		return supported
+		n_supported = supported_set.count()
+
+		df_list.append(supported_set)
+
+		while 0 < n_supported:
+
+			potential_set = self._permute_increasing(df=supported_set, show=False)
+
+			supported_set = self._scan(potential_sets=potential_set)
+
+			n_supported = supported_set.count()
+			
+			df_list.append(supported_set)
+
+		df_list.pop()
+
+		return df_list
+			
 
 
 	def _scan(self, potential_sets:DataFrame) -> DataFrame:
@@ -100,7 +117,7 @@ class APriori:
 		return F.udf(_subsets, ArrayType(ArrayType(IntegerType())))
 
 
-	def permute_increasing(self, df: DataFrame, show: bool = True):
+	def _permute_increasing(self, df: DataFrame, show: bool = True):
 		"""Takes a one column dataframe of set/lists and returns a dataframe with permutations of these with one more length.\\
 			Eg: [{A, B}, {B, C}, {C, A}] -> [{A, B, C}]\\
 			Expecting the column with sets to be named 'sets'."""
@@ -133,5 +150,18 @@ def test_scan():
 	apriori._scan(potential_sets=potential_sets).show()
 
 
+def test_apriori():
+
+	spark = SparkSession.builder.appName("test").getOrCreate()
+	df = spark.sql('SELECT * FROM VALUES (ARRAY(1,2,3)), (ARRAY(1, 2, 4)), (ARRAY(2, 3)) AS t(basket)')
+	df.show()
+	apriori = APriori(df=df, s=2)
+
+	df_list = apriori.apriori_algorithm()
+
+	for df in df_list:
+		df.show()
+
+
 if __name__ == "__main__":
-	test_scan()
+	test_apriori()
