@@ -3,3 +3,4 @@ Data/*
 .env
 *.env
 .DS_Store
+*.pyc

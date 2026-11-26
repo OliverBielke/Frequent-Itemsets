@@ -23,7 +23,7 @@ class APriori:
 		"""The support. """
 
 
-	def apriori_algorithm(self) -> list[DataFrame]:
+	def apriori_algorithm(self, prints:bool=False) -> list[DataFrame]:
 		"""Get the dataframes of the supported sets at each number of elements in increasing order. 
 		
 		Returns:
@@ -41,8 +41,11 @@ class APriori:
 
 		df_list.append(supported_set)
 
+		cycle_num = 2
 		while 0 < n_supported:
 
+			if prints: print(f"Started cycle number {cycle_num}")
+			
 			potential_set = self._permute_increasing(df=supported_set, show=False)
 
 			supported_set = self._scan(potential_sets=potential_set)
@@ -50,6 +53,8 @@ class APriori:
 			n_supported = supported_set.count()
 			
 			df_list.append(supported_set)
+
+			cycle_num += 1
 
 		df_list.pop()
 
