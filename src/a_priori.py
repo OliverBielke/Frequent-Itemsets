@@ -100,6 +100,26 @@ class APriori:
 		return F.udf(_subsets, ArrayType(ArrayType(IntegerType())))
 
 
+	def permute_increasing(self, df: DataFrame, show: bool = True):
+		"""Takes a one column dataframe of set/lists and returns a dataframe with permutations of these with one more length.\\
+			Eg: [{A, B}, {B, C}, {C, A}] -> [{A, B, C}]\\
+			Expecting the column with sets to be named 'sets'."""
+		k = df.select(F.size("set")).first()[0]+1
+		required_pairs = (k*(k-1)//2)
+		merged = (df.alias("a")
+				.join(df.alias("b"), F.col("a.set") > F.col("b.set"))
+				.select(F.array_distinct(F.sort_array(F.concat('a.set', 'b.set'))).alias('merged')).filter(F.size('merged') == k))
+
+		new_sets = (
+			merged.groupBy("merged")
+				.count()
+				.filter(F.col("count") == required_pairs)
+				.select(F.col("merged").alias("set"))
+		)
+		if show: new_sets.show()
+		return new_sets
+
+
 def test_scan():
 
 	spark = SparkSession.builder.appName("test").getOrCreate()
