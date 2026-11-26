@@ -1,5 +1,12 @@
+from __future__ import annotations
+from typing import TYPE_CHECKING
+
 from pyspark.sql import functions as F, SparkSession, DataFrame
+from pyspark.sql.types import IntegerType, ArrayType
 import itertools
+
+if TYPE_CHECKING:
+	from pyspark.sql._typing import UserDefinedFunctionLike  # pyright: ignore[reportMissingModuleSource]
 
 class APriori:
 
@@ -33,54 +40,78 @@ class APriori:
 		return supported
 
 
-	def _frequent_sets(self, basket:list[int], potential_sets:list[list[int]]) -> list[list[int]]:
-		"""Get the frequent sets in the basket. 
-		
+	def _scan(self, potential_sets:DataFrame) -> DataFrame:
+		"""Filters out the relevant sets based on the potential sets and the original data. 
+				
 		Args:
-			basket (list[int]): The sorted basket to check if the sets exist in. 
-			potential_sets (list[list[int]]): The sorted sets we should check if they are in the basket. 
+			potential_sets (DataFrame): Distinct potential sets. 
 		
 		Returns:
-			frequent (list[list[int]]): The sets that are in the basket. """
+			supported_sets (DataFrame): The sets with enough support. """
 
-		basket_set = set(basket)
+		udf_frequent_sets = self._udf_subsets(potential_sets=potential_sets)
 
-		frequent = []
+		subsets = self.df.withColumn('subsets', udf_frequent_sets(F.col('basket')))
 
-		for potential in potential_sets:
-			potential_set = set(potential)
-			if potential_set <= basket_set:
-				frequent.append(potential)
+		set_list = subsets.select(F.explode('subsets').alias('set')) # Each item in its own row
 
-		return frequent
+		support = set_list.groupBy('set').count().withColumnRenamed('count', 'support') # Count each set
+			
+		supported = support.filter(F.col('support') >= self.s) # Filter based on how many times the set appears
+
+		supported_sets = supported.drop('support')
+
+		return supported_sets
 
 
-def test_frequent_sets():
+	def _udf_subsets(self, potential_sets:DataFrame) -> UserDefinedFunctionLike:
+		"""
+		
+		Args:
+			potential_sets (DataFrame): Distinct potential sets. 
+		
+		Returns:
+			udf (UserDefinedFunctionLike): User defined function to compute the sets in each basket. """
 
-	apriori = APriori(None, None)
+		potential_tuples = {tuple(potential_list[0]) for potential_list in potential_sets.toLocalIterator()}
 
-	assert apriori._frequent_sets([1, 3, 5, 6, 8], [[1, 2], [2, 4], [1, 5], [6, 8]]) == [[1, 5], [6, 8]], "frequent_sets not correct"
-	assert apriori._frequent_sets([1, 3, 5, 6, 8], [[1, 2], [2, 4], [1, 2], [4, 8]]) == [], "Not correct when no match"
-	assert apriori._frequent_sets([], [[1, 2], [2, 4], [1, 2], [4, 8]]) == [], "Not correct when empty basket"
-	assert apriori._frequent_sets([1, 3, 5, 6, 8], []) == [], "Not correct when no potential set"
+		def _subsets(basket:list[int]) -> list[list[int]]:
+			"""Get the frequent sets in the basket. 
+			
+			Args:
+				basket (list[int]): The sorted basket to check if the sets exist in.
+			
+			Returns:
+				frequent_sets (list[list[int]]): The sets that are in the basket. """
+
+			if len(potential_tuples) == 0:
+				return []
+						
+			set_len = len(next(iter(potential_tuples)))
+
+			basket_tuple_set = set(itertools.combinations(basket, set_len))
+
+			frequent_tuples = basket_tuple_set.intersection(potential_tuples)
+
+			frequent_lists = [list(frequent) for frequent in frequent_tuples]
+
+			return frequent_lists
+
+		return F.udf(_subsets, ArrayType(ArrayType(IntegerType())))
+
+
+def test_scan():
+
+	spark = SparkSession.builder.appName("test").getOrCreate()
+	df = spark.sql('SELECT * FROM VALUES (ARRAY(1,2,3)), (ARRAY(1, 2, 4)), (ARRAY(2, 3)) AS t(basket)')
+	df.show()
+	apriori = APriori(df=df, s=2)
+
+	potential_sets = spark.sql('SELECT * FROM VALUES (ARRAY(2,3)), (ARRAY(1,2)), (ARRAY(1,3)) AS t(set)')
+	potential_sets.show()
+
+	apriori._scan(potential_sets=potential_sets).show()
 
 
 if __name__ == "__main__":
-	test_frequent_sets()
-	"""
-	spark = SparkSession.builder.appName("test").getOrCreate()
-	df = spark.sql('SELECT * FROM VALUES (ARRAY(1,2,3)), (ARRAY(2, 4)), (ARRAY(2, 3)) AS t(basket)')
-	df.show()
-
-	apriori = APriori(df=df, s=2)
-
-	first = apriori._first_filter()
-
-	first.show()
-
-	#first.select(F.)
-
-	first.crossJoin()
-	F.array_contains()
-	F.array_intersect()
-	F.size()"""
+	test_scan()
